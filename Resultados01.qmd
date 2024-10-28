@@ -1,0 +1,301 @@
+---
+title: "Impacto de la Respiración en la Pérdida de Peso de Bellotas"
+author: "Mompeán, E."
+date: "today"
+date-format: "medium"
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+toc: TRUE
+---
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(car)       # Para pruebas de homogeneidad de varianza (Levene)
+library(MASS)      # Para el test de normalidad de Shapiro-Wilk
+library(FSA)       # Para hacer la prueba post-hoc
+```
+
+
+# Introducción y objetivos
+
+Los ensayos de desecación son métodos experimentales de uso común para la determinación de las tasas de desecación de las bellotas. Estos ensayos son simples, ya que consisten únicamente en dejar las bellotas en condiciones ambientales estandarizadas (generalmente condiciones de laboratorio) y pesarlas a intervalos regulares de tiempo para determinar esta pérdida de peso como pérdida de agua. Sin embargo, Pedro llamó la atención sobre que estos ensayos no tienen en cuenta la pérdida de peso de la semilla por respiración. Los embriones en las bellotas están vivos y por lo tanto respiran, lo que conlleva una pérdida de peso en forma de $CO_2$. Aunque tenemos la intuición de que esta pérdida de peso por respiración es pequeña, la realidad es que no existen, hasta donde nosotros sabemos, artículos científicos que tengan en cuenta la pérdida de peso por respiración. 
+
+El objetivo de este ensayo es determinar si la pérdida de peso de las bellotas durante un ensayo de desecación estándar se debe casi exclusivamente a la pérdida de agua o si existe una parte de esa pérdida de peso que se debe a la respiración y no es despreciable. 
+
+# Metodología
+
+Desde el 19 de Septiembre hasta el 7 de Octubre se tomaron medidas diarias del peso de dos conjuntos de 10 bellotas de dos especies diferentes, *Quercus ilex* y *Quercus faginea*. Estas son las bellotas desecadas a temperatura ambiente de laboratorio, su pérdida de peso es resultado de la suma de la pérdida de agua y la respiración de la bellota. Al mismo tiempo, entre el 19 y el 21 de septiembre se tomaron dos conjuntos de 10 bellotas de las dos especies mencionadas y de los mismos lotes elegidos para el ensayo ya descrito. Estos dos conjuntos de bellotas se sometieron a 70ºC durante 48 horas. Las altas temperaturas aplicadas pretenden desecar el embrión rápidamente, matándolo y evitando que la pérdida de peso de la bellota pueda deberse a la respiración. Toda la pérdida de peso se debe en este ensayo a la pérdida de agua. 
+
+Según esta metodología, podemos extraer las siguientes predicciones en caso de que nuestra hipótesis sea correcta, es decir que la respiración sea un factor determinante en la pérdida de peso de la bellota: 
+
+1. El ratio peso seco/peso fresco de las bellotas sometidas a un ensayo de desecación a temperatura ambiente será significativamente más bajo que las bellotas sometidas a la desecación a alta temperatura en la estufa. 
+2. Partiendo de dos grupos de bellotas con tamaños similares, la aplicación de tratamientos de desecación diferentes (ambiente y estufa) dará lugar a grupos de bellotas con pesos secos diferentes, siendo los pesos secos de las bellotas sometidas a desecación a temperatura ambientes significativamente más bajos. 
+
+
+# Resumen de resultados
+
+Ninguna de las predicciones se cumplieron. Respecto a la primera predicción, el análisis del ratio de peso seco/peso fresco entre dos tratamientos muestra que no hay diferencias significativas ($p = 0.996$), lo cual sugiere que la respiración no afecta la pérdida de peso en las bellotas. Tampoco se observaron diferencias significativas por especie ($p = 0.695$) ni interacción entre tratamiento y especie ($p = 0.288$). Respecto a la segunda predicción, se consideró también si había diferencias en el peso seco de bellotas secadas en distintos ambientes (Ambiente y Estufa). La falta de diferencia en el peso seco, tras partir de pesos frescos similares, refuerza la ausencia de efecto respiratorio sobre la pérdida de peso. 
+
+# Resultados
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+rD1 <- read_excel(path = "data/PesoCotiledones.xlsx", sheet = 1)
+rD2 <- read.csv2(file = "data/PesoCotiledones.csv")
+
+cols <- rD2[1,]
+df2 <- rD2[2:21,]
+colnames(df2) <- cols
+colnames(df2)[3] <- "i"
+df2 <- df2[,1:16]
+df2$i <- as.numeric(df2$i)
+
+# Convertir las comas a puntos para que los valores numéricos sean reconocidos correctamente
+df2[, 4:16] <- lapply(df2[, 4:16], function(x) as.numeric(gsub(",", ".", x)))
+
+
+# Hacer el pivot longer
+df2 <- pivot_longer(df2, 
+                    cols = starts_with("19-9-24 17:00"):starts_with("4-10-24 13:00"), 
+                    names_to = "Fecha", 
+                    values_to = "Peso")
+
+# Convertir la columna 'Fecha' en formato de fecha usando dmy
+df2 <- df2 %>%
+  mutate(Fecha = dmy_hm(Fecha))
+
+
+df2 <- df2 %>%
+  # Agrupar por 'Especie' e 'i'
+  group_by(Especie, i) %>%
+  # Calcular la diferencia de tiempo entre fechas consecutivas en horas
+  mutate(Tiempo_acumulado = cumsum(c(0, as.numeric(difftime(Fecha[-1], Fecha[-length(Fecha)], units = "hours"))))) %>%
+  ungroup()
+
+source(file = "calcular_tasa_desecación.R")
+
+# Añadir Peso seco
+df2 <- 
+merge(x = df2, y = rD2[, c(1, 3, 17, 18)], 
+      by.x = c("Especie", "i"), by.y = c("X", "X.2"), 
+      all.x = TRUE)
+colnames(df2)[9:10] <- c("Peso seco", "Peso seco cotiledones")
+df2[, 9:10] <- lapply(df2[, 9:10], function(x) as.numeric(gsub(",", ".", x)))
+
+# Arreglar formato de algunas variables
+df2$Especie <- as.factor(df2$Especie)
+df2$Tratamiento <- as.factor(df2$Tratamiento)
+
+# Crear variable ratio Peso seco/Peso fresco
+df2.rt <-
+df2 |>
+  filter(Tiempo_acumulado == 0) |>
+  mutate(
+    `Ratio peso seco / peso fresco` = `Peso seco` / Peso 
+  )
+df2 <- merge(x = df2, y = df2.rt[c( "Especie", "i", "Ratio peso seco / peso fresco")], 
+             by = c("Especie", "i"), all.x = TRUE)
+colnames(rD1)[3] <- "i"
+df2 <- 
+merge(df2, df2.rt[c( "Especie", "i", "Peso")], by = c("Especie", "i")
+      )
+colnames(df2)[c(7, 12)] <- c("Peso", "Peso fresco")
+
+# Unir datasets con información de ambiente y estufa
+## Paso 1: Ajustar rD1 añadiendo las columnas que faltan en df2
+rD1$Fecha <- NA  # Añadir columna 'Fecha' con NAs
+rD1$Tiempo_acumulado <- NA  # Añadir 'Tiempo_acumulado' con NAs
+rD1$Ratio_peso_seco_peso_fresco <- NA  # Añadir 'Ratio peso seco / peso fresco' con NAs
+
+## Paso 2: Eliminar columnas relacionadas con los cotiledones en rD1
+rD1 <- rD1[, !names(rD1) %in% c("Cotiledones fresco (g)", "Cotiledones seco (g)")]
+
+## Paso 3: Renombrar las columnas de rD1 para que coincidan con las de df2
+names(rD1)[names(rD1) == "Peso fresco (g)"] <- "Peso fresco"
+names(rD1)[names(rD1) == "Peso seco (g)"] <- "Peso seco"
+names(rD1)[names(rD1) == "Longitud (mm)"] <- "Longitud (mm)"
+names(rD1)[names(rD1) == "Anchura (mm)"] <- "Anchura (mm)"
+
+## Paso 4: Unir los datasets usando rbind.fill (de la librería plyr)
+combined_df <- bind_rows(df2, rD1)
+
+## Paso 5: Recalcular ratio peso seco peso fresco
+combined_df[combined_df$Tratamiento == "Estufa",]$`Ratio peso seco / peso fresco` <- rD1$`Peso seco` / rD1$`Peso fresco`
+
+## Paso 6: Reajustes de columnas no deseadas y formatos
+combined_df <- combined_df[,-13]
+
+# Comparación de ratio peso seco/peso fresco entre tratamiento ambiente y tratamiento estufa
+sel <- c(1, 12, 23, 34, 45, 56, 67, 78, 89, 
+         100, 111, 122, 133, 144, 155, 166, 
+         177, 188, 199, 210, 221:240)
+combined_df1 <- combined_df[sel,]
+
+## Calcular la media y el error estándar para cada tratamiento
+summary_df <- combined_df1 %>%
+  group_by(Tratamiento) %>%
+  summarise(
+    mean_ratio = mean(`Ratio peso seco / peso fresco`),
+    se_ratio = sd(`Ratio peso seco / peso fresco`) / sqrt(n())
+  )
+
+summary_df2 <- combined_df1 %>%
+  group_by(Tratamiento, Especie) %>%
+  summarise(
+    mean_ratio = mean(`Ratio peso seco / peso fresco`),
+    se_ratio = sd(`Ratio peso seco / peso fresco`) / sqrt(n())
+  )
+```
+
+El cálculo de la media y el error estándar del ratio peso seco/peso fresco en los dos tratamientos indica que no existen diferencias entre los tratamientos (@fig-meanse01, $p = 0.996$). Esto implica que no existe un efecto significativo de la respiración en la pérdida de peso de la bellota. Tampoco se encuentran diferencias en función de la especie ($p = 0.695$) ni efectos significativos de la interacción entre el tratamiento y la especie ($0.288$). La predicción 1 no se cumple. 
+
+Un enfoque alternativo es estudiar si existen diferencias significativas entre las bellotas secadas en ambientes diferentes (Ambiente y Estufa) en términos de su peso seco. Si las bellotas que han sufrido tratamientos diferentes acaban en pesos secos diferentes, aún partiendo de grupos de bellotas con pesos frescos similares, esto significaría que existe un efecto significativo de la respiración sobre la pérdida de peso. La @fig-meanse02 muestra como no existen diferencias en el peso fresco al inicio del ensayo para ninguna de las dos especies y tampoco existen diferencias con distintos tratamientos. Al realizar un `kruskal.test()` sobre los datos, los únicos grupos de datos que presentan diferencias significativas ($p \leq 0.05$) son los datos de peso fresco frente a peso seco, diferencias que son obvias. La predicción 2 no se cumple. 
+
+```{r, message=FALSE, warning=FALSE}
+# ANOVA de peso seco/peso fresco segun tratamiento y especie
+# Definir variables
+data <- combined_df1
+response <- data$`Ratio peso seco / peso fresco`
+factor1 <- data$Tratamiento
+factor2 <- data$Especie
+
+# Crear un modelo ANOVA con la interacción de dos variables categóricas
+modelo <- aov(response ~ factor1 * factor2, data = data)
+
+### 1. Test de Normalidad de los residuos
+# Extraer los residuos del modelo
+residuos <- residuals(modelo)
+
+# Prueba de Shapiro-Wilk para testar normalidad
+shapiro_test <- shapiro.test(residuos)
+print(shapiro_test) # Distribución normal
+
+### 2. Test de Homogeneidad de Varianzas
+# Prueba de Levene para testar homogeneidad de varianza
+levene_test <- leveneTest(response ~ factor1 * factor2, data = data)
+print(levene_test) # Homogeneidad de varianzas
+
+summary(
+  aov(`Ratio peso seco / peso fresco` ~ Tratamiento*Especie, data = combined_df1))
+```
+
+```{r, message=FALSE, warning=FALSE}
+# ANOVA de peso fresco y peso seco segun tratamiento y especie
+# Definir variables
+combined_df2 <- data.frame(
+  Peso = c(combined_df1$`Peso fresco`, combined_df1$`Peso seco`),
+  `Tipo de peso` = c(rep("Peso fresco", 40), rep("Peso seco", 40))
+)
+ 
+combined_df2 <- cbind(
+  rbind(combined_df1[,c(1:5,11)], combined_df1[,c(1:5,11)]), 
+  combined_df2)
+data <- combined_df2
+response <- combined_df2$Peso
+factor1 <- data$Tratamiento
+factor2 <- data$Especie
+factor3 <- data$Tipo.de.peso
+
+# Crear un modelo ANOVA con la interacción de dos variables categóricas
+modelo <- aov(response ~ factor1 * factor2 * factor3, data = data)
+
+### 1. Test de Normalidad de los residuos
+# Extraer los residuos del modelo
+residuos <- residuals(modelo)
+
+# Prueba de Shapiro-Wilk para testar normalidad
+shapiro_test <- shapiro.test(residuos)
+print(shapiro_test) # Distribución NO-normal
+
+### 2. Test de Homogeneidad de Varianzas
+# Prueba de Levene para testar homogeneidad de varianza
+levene_test <- leveneTest(response ~ factor1 * factor2 * factor3, data = data)
+print(levene_test) # Homogeneidad de varianzas
+
+# Aplicar Kruskal test
+# Crear una nueva variable combinada
+data$combined_factor <- interaction(combined_df2$Tratamiento, combined_df2$Especie, combined_df2$Tipo.de.peso)
+
+# Aplicar el test de Kruskal-Wallis a la nueva variable
+kruskal_test_combined <- kruskal.test(response ~ combined_factor, data = data)
+print(kruskal_test_combined)
+
+posthoc <- dunnTest(response ~ combined_factor, data = data, method = "bh")
+posthoc$res[posthoc$res$P.adj <= 0.05,]
+```
+
+
+# Figuras
+
+```{r, message=FALSE, warning=FALSE}
+#| label: fig-meanse01
+#| fig-cap: "Media y error estándar del ratio peso seco/peso fresco para el ensayo de desecación en laboratorio (ambiente) y a 70ºC (estufa)."
+
+# Crear el gráfico de puntos con barras de error
+ggplot(summary_df, aes(x = Tratamiento, y = mean_ratio)) +
+  geom_point(size = 4, color = "#69b3a2") +  # Media representada como un punto
+  geom_errorbar(aes(ymin = mean_ratio - se_ratio, ymax = mean_ratio + se_ratio), 
+                width = 0.1, color = "black", size = 0.8) +  # Barras de error
+  labs(title = "Media del Ratio Peso Seco / Peso Fresco por Tratamiento",
+       x = "Tratamiento",
+       y = "Ratio Peso Seco / Peso Fresco") +
+  theme_minimal(base_size = 14) +  # Fuente base ajustada para mayor legibilidad
+  theme(
+    panel.grid.major = element_blank(),  # Eliminar líneas de cuadrícula grandes
+    panel.grid.minor = element_blank(),  # Eliminar líneas de cuadrícula pequeñas
+    axis.line = element_line(size = 0.8, color = "black"),  # Línea de eje más clara
+    axis.title.x = element_text(margin = margin(t = 10)),  # Espacio entre el título y el eje x
+    axis.title.y = element_text(margin = margin(r = 10)),  # Espacio entre el título y el eje y
+    plot.title = element_text(hjust = 0.5, face = "bold"),  # Centrar el título y hacerlo en negrita
+    axis.text = element_text(color = "black")  # Colores de texto del eje más oscuros
+  )
+```
+
+```{r, message=FALSE, warning=FALSE}
+#| label: fig-meanse02
+#| fig-cap: "Media y error estándar del peso para el ensayo de desecación en laboratorio (ambiente) y a 70ºC durante 48 horas (estufa), graficado por especie"
+
+##
+# Gráfico t0 a tf del peso 
+##
+combined_df2 <- data.frame(
+  Peso = c(combined_df1$`Peso fresco`, combined_df1$`Peso seco`),
+  `Tipo de peso` = c(rep("Peso fresco", 40), rep("Peso seco", 40))
+)
+ 
+combined_df2 <- cbind(
+  rbind(combined_df1[,c(1:5,11)], combined_df1[,c(1:5,11)]), 
+  combined_df2)
+
+summary_df4 <- combined_df2 %>%
+  group_by(Tratamiento, Especie, Tipo.de.peso) %>%
+  summarise(
+    mean_ratio = mean(Peso),
+    se_ratio = sd(Peso) / sqrt(n())
+  )
+
+# Crear el gráfico de puntos con barras de error
+ggplot(summary_df4, aes(x = Tipo.de.peso, y = mean_ratio, colour = Tratamiento), alpha = 0.25) +
+  geom_point(size = 2) +  # Media representada como un punto
+  geom_errorbar(aes(ymin = mean_ratio - se_ratio, ymax = mean_ratio + se_ratio), 
+                width = 0.1, size = 0.8) +   # Barras de error
+  facet_wrap(~ Especie) +
+  ylab("Media ± EE del peso (g)") +
+  xlab("")
+```
+
+
+
+
+
+
+
+
+
+
+
